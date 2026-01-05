@@ -1,0 +1,57 @@
+pipeline {
+    agent any
+
+    environment {
+        EC2_HOST = '13.232.165.197'
+        EC2_USER = 'ec2-user'
+        APP_DIR  = '/var/www/node-app'
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                checkout scmGit(
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        credentialsId: 'git-jenkins',
+                        url: 'https://github.com/KAILAS-R-PILLAI/simple-node-app.git'
+                    ]]
+                )
+            }
+        }
+
+        stage('Deploy to EC2') {
+            steps {
+                sshagent(credentials: ['EC2_SSH_KEY']) {
+                    sh '''
+                        echo "📦 Deploying application to EC2..."
+                        ssh-keygen -R $EC2_HOST || true
+                        ssh -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST \
+                          "sudo mkdir -p $APP_DIR && sudo chown -R ec2-user:ec2-user $APP_DIR"
+                        rsync -avz --delete \
+                          --exclude .git \
+                          -e "ssh -o StrictHostKeyChecking=no" \
+                          ./ $EC2_USER@$EC2_HOST:$APP_DIR
+                        ssh -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "
+                          cd $APP_DIR &&
+                          npm install &&
+                          pm2 delete node-app || true &&
+                          pm2 start server.js --name node-app &&
+                          pm2 save
+                        "
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Deployment successful!'
+        }
+        failure {
+            echo '❌ Deployment failed!'
+        }
+    }
+}
